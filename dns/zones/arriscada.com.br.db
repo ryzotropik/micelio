@@ -1,0 +1,12 @@
+$TTL 3600
+@   IN SOA ns1.arriscada.com.br. admin.arriscada.com.br. (
+        2026012901 ; serial YYYYMMDDNN - update accordingly
+        7200       ; refresh
+        3600       ; retry
+        1209600    ; expire
+        3600 )     ; minimum
+
+    IN NS   ns1.arriscada.com.br.
+
+ns1 IN A   206.42.10.180
+www IN A   206.42.10.180

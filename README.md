@@ -1,2 +1,0 @@
-# micelio
-daqui pra cima

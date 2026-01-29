@@ -1,0 +1,15 @@
+version: '3.8'
+services:
+  bind:
+    build: .
+    container_name: bind-ryzotropik
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+    cap_add:
+      - NET_BIND_SERVICE
+    restart: unless-stopped
+    volumes:
+      - ./zones:/etc/bind/zones:ro
+      - ./named.conf:/etc/bind/named.conf:ro
+      - ./named.conf.options:/etc/bind/named.conf.options:ro

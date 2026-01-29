@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  nginx:
+    build: .
+    container_name: nginx-proxy
+    ports:
+      - "80:80"
+    depends_on:
+      - ryzotropik_app
+      - arriscada_app
+
+  ryzotropik_app:
+    image: nginx:alpine
+    container_name: ryzotropik_app
+    volumes:
+      - ../web/ryzotropik:/usr/share/nginx/html:ro
+
+  arriscada_app:
+    image: nginx:alpine
+    container_name: arriscada_app
+    volumes:
+      - ../web/arriscada:/usr/share/nginx/html:ro
+
+networks:
+  default:
+    name: webproxy_net

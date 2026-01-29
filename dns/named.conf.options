@@ -1,0 +1,6 @@
+// Additional options file (kept separate for clarity)
+options {
+    directory "/var/cache/bind";
+    pid-file "/var/run/named.pid";
+    version ""; // hide version
+};
