@@ -1,0 +1,23 @@
+# Optional overlay: restart nginx when configs change (no rebuild).
+# Requires Docker Compose v2.22+ (`docker compose`, not legacy `docker-compose` v1).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.watch.yml up -d --watch
+#   # or: make up-watch
+services:
+  ryzotropik_app:
+    develop:
+      watch:
+        - path: ./nginx.conf
+          action: restart
+
+  arriscada_app:
+    develop:
+      watch:
+        - path: ./nginx.conf
+          action: restart
+
+  proxy:
+    develop:
+      watch:
+        - path: ./nginx-proxy.conf
+          action: restart
