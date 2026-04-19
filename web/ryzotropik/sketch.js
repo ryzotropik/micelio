@@ -1,329 +1,340 @@
-/**
- * ryzotropik — ASCII morph: figures (e.g. mushroom ↔ motherboard) via a shared Figure abstraction.
- * Modular layout: tweak CONFIG, add Figure subclasses, or morph between any two figures.
- */
+// ==========================================
+// MÁQUINA ORGANO-RIZOTRÓPIKA v2.0
+// Estética: TV de Tubo, Conectiva Linux, Dial-up
+// ==========================================
 
-// ---------------------------------------------------------------------------
-// Config — single place to tune look and timing
-// ---------------------------------------------------------------------------
+let estado = "OFF"; // OFF, BOOTING, DIALING, RIZOMA
+let timerEstado = 0;
 
-const CFG = {
-  textSize: 12,
-  background: [18, 22, 28],
-  colorMushroom: [232, 216, 190],
-  colorCircuit: [64, 255, 180],
-  morphSpeed: 0.02,
-  morphWave: false,
-  /** Characters from dim → bright (organic / metallic read) */
-  asciiRamp: " .'`^\",:;Il!i><~+_-?][}{1)(|/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&%@",
-};
+// Dados do Rizoma
+let palavras = [
+  "RYZOTRÓPIK", "CORPO SEM ÓRGÃOS", "PRODUÇÃO",
+  "NOME??", "TRAGÉDIA CULTURAL", "4.0",
+  "MÁQUINA", "CONTRADIÇÃO"
+];
+let nodes = [];
 
-// ---------------------------------------------------------------------------
-// Time → morph factor t in [0, 1]
-// ---------------------------------------------------------------------------
+// Mensagem Dial-up
+let manifesto = "A ARTE NÃO OBEDECE AO ESQUEMA FORDIANO DE PRODUÇÃO.";
+let textoDigitado = "";
+let indexCaractere = 0;
 
-function morphFactorFromTime(ms) {
-  if (CFG.morphWave) {
-    const phase = ms * CFG.morphSpeed;
-    return 0.5 + 0.5 * Math.sin(phase);
-  }
-  const period = 8000;
-  return (ms % period) / period;
-}
-
-function easeInOutCubic(t) {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-// ---------------------------------------------------------------------------
-// Normalized grid coords: nx, ny in roughly [0, 1]
-// ---------------------------------------------------------------------------
-
-function normXY(ix, iy, cols, rows) {
-  return {
-    nx: (ix + 0.5) / cols,
-    ny: (iy + 0.5) / rows,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Shared SDF helpers for scalar fields (~[0, 1] ink)
-// ---------------------------------------------------------------------------
-
-/** Ellipse SDF: negative inside, positive outside (softened). */
-function sdEllipse(nx, ny, cx, cy, rx, ry) {
-  const px = (nx - cx) / rx;
-  const py = (ny - cy) / ry;
-  return Math.sqrt(px * px + py * py) - 1;
-}
-
-/** Smooth 0..1 from signed distance (inside brighter). */
-function sdfToIntensity(d, inner, outer) {
-  return constrain(map(d, outer, inner, 0, 1), 0, 1);
-}
-
-// ---------------------------------------------------------------------------
-// Figure — abstraction: name, RGB, and per-cell intensity
-// ---------------------------------------------------------------------------
-
-class Figure {
-  /**
-   * @param {string} name
-   * @param {[number, number, number]} rgb
-   */
-  constructor(name, rgb) {
-    this.name = name;
-    this.rgb = rgb;
-  }
-
-  /**
-   * @param {number} ix
-   * @param {number} iy
-   * @param {number} cols
-   * @param {number} rows
-   * @returns {number} intensity in [0, 1]
-   */
-  intensity(ix, iy, cols, rows) {
-    throw new Error(`${this.constructor.name}.intensity() must be implemented`);
-  }
-}
-
-/**
- * Cubensis-inspired silhouette: convex cap + central stem + subtle veil hint.
- */
-class MushroomFigure extends Figure {
-  constructor(rgb) {
-    super("mushroom", rgb);
-  }
-
-  intensity(ix, iy, cols, rows) {
-    const { nx, ny } = normXY(ix, iy, cols, rows);
-
-    const capD = sdEllipse(nx, ny, 0.5, 0.34, 0.4, 0.2);
-    const cap = sdfToIntensity(capD, -0.08, 0.12);
-
-    const stemW = 0.055;
-    const stem =
-      nx > 0.5 - stemW &&
-      nx < 0.5 + stemW &&
-      ny > 0.42 &&
-      ny < 0.94
-        ? sdfToIntensity(Math.abs(nx - 0.5) / stemW - 1, -0.2, 0.35)
-        : 0;
-
-    const annulus =
-      nx > 0.38 &&
-      nx < 0.62 &&
-      ny > 0.4 &&
-      ny < 0.46
-        ? 0.35 * (1 - Math.abs(ny - 0.43) / 0.03)
-        : 0;
-
-    const gills =
-      ny > 0.36 &&
-      ny < 0.44 &&
-      capD < 0.15
-        ? 0.25 *
-          (0.5 +
-            0.5 *
-              Math.sin(
-                (nx * cols + ny * rows) * 0.9 + noise(ix * 0.1, iy * 0.1) * 4
-              ))
-        : 0;
-
-    const speckle =
-      0.08 * noise(ix * 0.31 + 20, iy * 0.29 + 10) * (cap > 0.3 ? 1 : 0);
-
-    return constrain(Math.max(cap, stem, annulus, gills) + speckle, 0, 1);
-  }
-}
-
-/**
- * Motherboard-like traces, vias, and a “chip” block; deterministic per cell.
- */
-class MotherboardCircuitFigure extends Figure {
-  constructor(rgb) {
-    super("motherboard", rgb);
-  }
-
-  intensity(ix, iy, cols, rows) {
-    const { nx, ny } = normXY(ix, iy, cols, rows);
-    const n = noise(ix * 0.08, iy * 0.08);
-
-    let v = 0;
-
-    const busH = ny > 0.48 && ny < 0.52 ? 0.75 : 0;
-    const busV = nx > 0.48 && nx < 0.52 ? 0.72 : 0;
-    v = Math.max(v, busH, busV);
-
-    const pitchX = Math.max(4, Math.floor(cols / 18));
-    const pitchY = Math.max(3, Math.floor(rows / 14));
-    const onGridH = iy % pitchY === 0 ? 0.45 + 0.2 * n : 0;
-    const onGridV = ix % pitchX === 0 ? 0.42 + 0.18 * n : 0;
-    v = Math.max(v, onGridH, onGridV);
-
-    const branch =
-      (ix + iy) % 7 === 0 && (ix % 3 === 0 || iy % 3 === 0) ? 0.35 : 0;
-    v = Math.max(v, branch);
-
-    const via = ix % pitchX === 0 && iy % pitchY === 0 ? 0.55 : 0;
-    v = Math.max(v, via);
-
-    const chipLeft = 0.58;
-    const chipRight = 0.88;
-    const chipTop = 0.12;
-    const chipBot = 0.38;
-    if (nx > chipLeft && nx < chipRight && ny > chipTop && ny < chipBot) {
-      const inner =
-        nx > chipLeft + 0.03 &&
-        nx < chipRight - 0.03 &&
-        ny > chipTop + 0.03 &&
-        ny < chipBot - 0.03;
-      v = Math.max(v, inner ? 0.95 : 0.7);
-      if ((ix + iy) % 2 === 0 && inner) v = Math.min(1, v + 0.05);
-    }
-
-    const pad =
-      dist(nx, ny, 0.22, 0.72) < 0.045 || dist(nx, ny, 0.78, 0.78) < 0.04
-        ? 0.5
-        : 0;
-    v = Math.max(v, pad);
-
-    return constrain(v + 0.06 * (n - 0.5), 0, 1);
-  }
-}
-
-/** Default scene pair; swap or extend with new Figure subclasses. */
-const FIGURES = {
-  mushroom: new MushroomFigure(CFG.colorMushroom),
-  motherboard: new MotherboardCircuitFigure(CFG.colorCircuit),
-};
-
-// ---------------------------------------------------------------------------
-// Morph — blend any two figures (intensity + display color)
-// ---------------------------------------------------------------------------
-
-/**
- * @param {Figure} from
- * @param {Figure} to
- * @param {number} tSmooth eased t in [0, 1]
- */
-function morphIntensity(from, to, tSmooth, ix, iy, cols, rows) {
-  const a = from.intensity(ix, iy, cols, rows);
-  const b = to.intensity(ix, iy, cols, rows);
-  return lerp(a, b, tSmooth);
-}
-
-/**
- * Color cross-fade tied to morph progress and local brightness.
- * @param {Figure} from
- * @param {Figure} to
- */
-function morphFigureColor(from, to, intensity, tSmooth) {
-  const cFrom = color(from.rgb[0], from.rgb[1], from.rgb[2]);
-  const cTo = color(to.rgb[0], to.rgb[1], to.rgb[2]);
-  const u = constrain(intensity * 0.65 + tSmooth * 0.35, 0, 1);
-  return lerpColor(cFrom, cTo, u);
-}
-
-function scalarToChar(intensity) {
-  const ramp = CFG.asciiRamp;
-  const idx = floor(constrain(intensity, 0, 0.9999) * ramp.length);
-  return ramp[idx];
-}
-
-// ---------------------------------------------------------------------------
-// Grid metrics — monospace cell size for stable columns
-// ---------------------------------------------------------------------------
-
-let cellW = 8;
-let cellH = 12;
-
-function refreshCellMetrics() {
-  push();
-  textFont("monospace");
-  textSize(CFG.textSize);
-  textLeading(CFG.textSize * 1.05);
-  cellW = max(textWidth("M"), textWidth("@"), textWidth("#"));
-  cellH = CFG.textSize * 1.15;
-  pop();
-}
-
-function gridDimensions() {
-  const cols = max(8, floor(width / cellW));
-  const rows = max(6, floor(height / cellH));
-  return { cols, rows };
-}
-
-/**
- * @param {Figure} fromFigure
- * @param {Figure} toFigure
- * @returns {{ chars: string[][], colors: p5.Color[][] }}
- */
-function buildAsciiFrame(cols, rows, tRaw, fromFigure, toFigure) {
-  const tSmooth = easeInOutCubic(constrain(tRaw, 0, 1));
-  const chars = [];
-  const colors = [];
-  for (let iy = 0; iy < rows; iy++) {
-    chars[iy] = [];
-    colors[iy] = [];
-    for (let ix = 0; ix < cols; ix++) {
-      const s = morphIntensity(fromFigure, toFigure, tSmooth, ix, iy, cols, rows);
-      chars[iy][ix] = scalarToChar(s);
-      colors[iy][ix] = morphFigureColor(fromFigure, toFigure, s, tSmooth);
-    }
-  }
-  return { chars, colors };
-}
-
-function drawAsciiFrame(chars, colors, offsetX, offsetY) {
-  push();
-  textFont("monospace");
-  textSize(CFG.textSize);
-  textLeading(CFG.textSize * 1.05);
-  noStroke();
-  textAlign(LEFT, TOP);
-  const rows = chars.length;
-  const cols = rows > 0 ? chars[0].length : 0;
-  for (let iy = 0; iy < rows; iy++) {
-    for (let ix = 0; ix < cols; ix++) {
-      fill(colors[iy][ix]);
-      text(chars[iy][ix], offsetX + ix * cellW, offsetY + iy * cellH);
-    }
-  }
-  pop();
-}
-
-// ---------------------------------------------------------------------------
-// p5 lifecycle
-// ---------------------------------------------------------------------------
+// Variáveis da TV (Moldura)
+let margemTV = 40;
 
 function setup() {
-  const c = createCanvas(windowWidth, windowHeight);
-  c.parent(document.body);
-  pixelDensity(1);
-  refreshCellMetrics();
+  createCanvas(windowWidth, windowHeight);
+  textFont('monospace');
+  textAlign(CENTER, CENTER);
+
+  // Inicializa os nós centralizados para a explosão inicial
+  for (let i = 0; i < palavras.length; i++) {
+    nodes.push(new Node(palavras[i], width / 2 + random(-10, 10), height / 2 + random(-10, 10)));
+  }
 }
 
 function draw() {
-  background(CFG.background[0], CFG.background[1], CFG.background[2]);
-  const t = morphFactorFromTime(millis());
-  const { cols, rows } = gridDimensions();
-  const { chars, colors } = buildAsciiFrame(
-    cols,
-    rows,
-    t,
-    FIGURES.mushroom,
-    FIGURES.motherboard
-  );
-  const gridPixelW = cols * cellW;
-  const gridPixelH = rows * cellH;
-  const ox = (width - gridPixelW) / 2;
-  const oy = (height - gridPixelH) / 2;
-  drawAsciiFrame(chars, colors, ox, oy);
+  // Limita o desenho à área da tela da TV
+  push();
+
+  if (estado === "OFF") {
+    background(5, 5, 5); // Tela apagada
+    drawPowerButton();
+  }
+  else if (estado === "BOOTING") {
+    background(0);
+    drawVisualBoot();
+  }
+  else if (estado === "DIALING") {
+    background(0);
+    drawDialingScreen();
+  }
+  else if (estado === "RIZOMA") {
+    // Fundo Clássico Conectiva Linux / Win95 (Azul-petróleo)
+    background(0, 128, 128);
+    drawRizoma();
+  }
+
+  // O filtro CRT e a Moldura da TV são desenhados por cima
+  drawCRTOverlay();
+  pop();
+
+  drawTVFrame(); // A carcaça de plástico do monitor
+}
+
+// ==========================================
+// ESTADOS DA INTERFACE
+// ==========================================
+
+function drawPowerButton() {
+  let bx = width / 2;
+  let by = height / 2;
+  let r = 40;
+
+  // Efeito de brilho se o mouse estiver em cima
+  let d = dist(mouseX, mouseY, bx, by);
+  if (d < r) {
+    stroke(255, 50, 50);
+    strokeWeight(6);
+    cursor(HAND);
+  } else {
+    stroke(150, 0, 0);
+    strokeWeight(4);
+    cursor(ARROW);
+  }
+
+  noFill();
+  // Símbolo clássico de Power
+  arc(bx, by, r, r, -PI / 2 + 0.5, 3 * PI / 2 - 0.5);
+  line(bx, by - r / 2 - 10, bx, by);
+}
+
+function drawVisualBoot() {
+  let progresso = millis() - timerEstado;
+
+  fill(200);
+  textSize(18);
+  textAlign(LEFT, TOP);
+  let startX = margemTV + 30;
+  let startY = margemTV + 30;
+
+  text("RYZOTRÓPIK BIOS v1.0.4", startX, startY);
+
+  // Simula checagem de RAM
+  let ram = min(64000, floor(map(progresso, 0, 2000, 0, 64000)));
+  text(`Memory Test: ${ram} OK`, startX, startY + 30);
+
+  if (progresso > 1000) {
+    text("Loading Kernel...", startX, startY + 60);
+  }
+
+  if (progresso > 2000) {
+    // Barra de progresso visual
+    let blocos = floor(map(progresso, 2000, 4000, 0, 20));
+    let barra = "[";
+    for (let i = 0; i < 20; i++) {
+      barra += (i < blocos) ? "█" : " ";
+    }
+    barra += "]";
+    text(`Mounting root fs: ${barra}`, startX, startY + 90);
+  }
+
+  if (progresso > 4500) {
+    mudarEstado("DIALING");
+  }
+}
+
+function drawDialingScreen() {
+  let progresso = millis() - timerEstado;
+
+  fill(255, 200, 0); // Amarelo terminal
+  textSize(16);
+  textAlign(LEFT, TOP);
+  let startX = margemTV + 30;
+
+  text("Executando: /sbin/dial-up.sh", startX, margemTV + 30);
+  text("Modem status: CONNECT 56000/ARQ/V90", startX, margemTV + 60);
+
+  // Manifesto digitado
+  if (frameCount % 3 === 0 && indexCaractere < manifesto.length) {
+    textoDigitado += manifesto.charAt(indexCaractere);
+    indexCaractere++;
+  }
+
+  fill(255); // Branco puro para a mensagem principal
+  textSize(22);
+  text(textoDigitado + (frameCount % 15 < 7 ? "█" : ""), startX, margemTV + 120, width - (margemTV * 2 + 60), height);
+
+  if (progresso > 5500) {
+    mudarEstado("RIZOMA");
+    textAlign(CENTER, CENTER);
+  }
+}
+
+function drawRizoma() {
+  // Limites da tela para as partículas não entrarem na moldura
+  let minX = margemTV + 50;
+  let maxX = width - margemTV - 50;
+  let minY = margemTV + 50;
+  let maxY = height - margemTV - 50;
+
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      let d = dist(nodes[i].pos.x, nodes[i].pos.y, nodes[j].pos.x, nodes[j].pos.y);
+
+      // Choque e Repulsão entre os nós
+      if (d > 0 && d < 250) {
+        let forcaRepulsao = 400 / (d * d);
+        let direcao = p5.Vector.sub(nodes[i].pos, nodes[j].pos).normalize();
+        nodes[i].acc.add(p5.Vector.mult(direcao, forcaRepulsao));
+        nodes[j].acc.sub(p5.Vector.mult(direcao, forcaRepulsao));
+      }
+
+      // Conexões (Alta Voltagem)
+      stroke(255, 255, 0, map(d, 0, 350, 150, 0)); // Linhas amarelas/elétricas
+      strokeWeight(map(d, 0, 350, 3, 0.5));
+      line(nodes[i].pos.x, nodes[i].pos.y, nodes[j].pos.x, nodes[j].pos.y);
+    }
+
+    // Mola pro centro
+    let atracaoCentro = p5.Vector.sub(createVector(width / 2, height / 2), nodes[i].pos);
+    atracaoCentro.mult(0.001);
+    nodes[i].acc.add(atracaoCentro);
+
+    // INTERAÇÃO COM O MOUSE (Corrigida para usabilidade)
+    let distMouse = dist(nodes[i].pos.x, nodes[i].pos.y, mouseX, mouseY);
+    if (distMouse < 80) {
+      // O mouse agora é um "campo magnético de glitch" que SEGURA a palavra
+      nodes[i].vel.mult(0.4); // Freio forte (atrito) para facilitar o clique
+      nodes[i].glitch = true;
+      cursor(HAND);
+    } else {
+      nodes[i].glitch = false;
+    }
+
+    // Rebater nas paredes virtuais da TV
+    if (nodes[i].pos.x < minX) { nodes[i].pos.x = minX; nodes[i].vel.x *= -1; }
+    if (nodes[i].pos.x > maxX) { nodes[i].pos.x = maxX; nodes[i].vel.x *= -1; }
+    if (nodes[i].pos.y < minY) { nodes[i].pos.y = minY; nodes[i].vel.y *= -1; }
+    if (nodes[i].pos.y > maxY) { nodes[i].pos.y = maxY; nodes[i].vel.y *= -1; }
+  }
+
+  // Verifica se o mouse saiu de cima de todos
+  let hovered = nodes.some(n => dist(n.pos.x, n.pos.y, mouseX, mouseY) < 80);
+  if (!hovered && estado === "RIZOMA") cursor(ARROW);
+
+  // Atualiza e Desenha os Nós
+  for (let n of nodes) {
+    n.update();
+    n.display();
+  }
+}
+
+// ==========================================
+// EFEITOS E MOLDURA DA TV
+// ==========================================
+
+function drawCRTOverlay() {
+  // Scanlines que afetam as cores (RGB)
+  strokeWeight(2);
+  for (let i = margemTV; i < height - margemTV; i += 4) {
+    stroke(0, 0, 0, 40);
+    line(margemTV, i, width - margemTV, i);
+  }
+
+  // Ruído RGB esporádico (estática)
+  if (estado === "RIZOMA" && random(1) < 0.05) {
+    noStroke();
+    fill(255, 255, 255, 15);
+    rect(margemTV, margemTV, width - margemTV * 2, height - margemTV * 2);
+  }
+}
+
+function drawTVFrame() {
+  noFill();
+
+  // Sombra interna (profundidade da tela)
+  stroke(0, 100);
+  strokeWeight(15);
+  rect(margemTV, margemTV, width - margemTV * 2, height - margemTV * 2, 20);
+
+  // A carcaça de plástico cinza da TV (Bezel)
+  stroke(30); // Cinza bem escuro
+  strokeWeight(margemTV * 2); // Espessura borda
+  rect(0, 0, width, height, 40); // Canto arredondado da TV
+}
+
+// ==========================================
+// CLASSE DOS NÓS
+// ==========================================
+
+class Node {
+  constructor(txt, x, y) {
+    this.txt = txt;
+    this.pos = createVector(x, y);
+    this.vel = createVector(random(-5, 5), random(-5, 5)); // Explosão inicial
+    this.acc = createVector(0, 0);
+    this.glitch = false;
+    this.clicado = 0; // Timer visual para o clique
+    // Cores vibrantes tipo Linux antigo / Anos 90
+    this.cores = [color(255, 255, 0), color(0, 255, 0), color(255, 100, 100), color(255)];
+    this.cor = random(this.cores);
+  }
+
+  update() {
+    this.vel.add(this.acc);
+    this.vel.mult(0.92); // Atrito geral
+    this.pos.add(this.vel);
+    this.acc.mult(0);
+    if (this.clicado > 0) this.clicado--;
+  }
+
+  display() {
+    noStroke();
+    textSize(20);
+
+    let renderX = this.pos.x;
+    let renderY = this.pos.y;
+    let bbox = textWidth(this.txt);
+
+    // Efeito de choque ao passar o mouse
+    if (this.glitch) {
+      fill(255, 0, 0); // Aberração vermelha
+      text(this.txt, renderX - 3, renderY);
+      fill(0, 0, 255); // Aberração azul
+      text(this.txt, renderX + 3, renderY);
+      fill(255); // Branco puro
+      renderX += random(-2, 2);
+      renderY += random(-2, 2);
+    } else {
+      // Fundo preto para destaque (estilo botões ou terminal)
+      fill(0, 180);
+      rectMode(CENTER);
+      rect(renderX, renderY, bbox + 16, 28);
+      fill(this.cor);
+    }
+
+    // Efeito de Flash ao clicar
+    if (this.clicado > 0) {
+      fill(255); // Pisca branco
+      rect(renderX, renderY, bbox + 16, 28);
+      fill(0); // Texto preto
+    }
+
+    text(this.txt, renderX, renderY);
+  }
+}
+
+// ==========================================
+// EVENTOS DE MOUSE
+// ==========================================
+
+function mousePressed() {
+  if (estado === "OFF") {
+    let d = dist(mouseX, mouseY, width / 2, height / 2);
+    if (d < 40) {
+      mudarEstado("BOOTING");
+    }
+  }
+  else if (estado === "RIZOMA") {
+    // Checar se clicou em uma palavra
+    for (let i = 0; i < nodes.length; i++) {
+      let d = dist(nodes[i].pos.x, nodes[i].pos.y, mouseX, mouseY);
+      if (d < 80) { // Hitbox amigável
+        nodes[i].clicado = 15; // Ativa o flash visual por 15 frames
+
+        // >>> AQUI ENTRARÁ A LÓGICA DE ABRIR A LETRA DA MÚSICA <<<
+        console.log("Palavra acessada: " + nodes[i].txt);
+      }
+    }
+  }
+}
+
+function mudarEstado(novoEstado) {
+  estado = novoEstado;
+  timerEstado = millis();
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  refreshCellMetrics();
 }
